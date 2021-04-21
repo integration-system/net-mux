@@ -2,28 +2,21 @@ package mux
 
 import "sync/atomic"
 
-type AtomicBool struct {
-	v *int32
+type atomicBool struct {
+	v *uint32
 }
 
-func (b *AtomicBool) Get() bool {
-	return atomic.LoadInt32(b.v) == 1
+func (b *atomicBool) Get() bool {
+	return atomic.LoadUint32(b.v) == 1
 }
 
-func (b *AtomicBool) Set(value bool) {
-	if value {
-		atomic.StoreInt32(b.v, 1)
-	} else {
-		atomic.StoreInt32(b.v, 0)
-	}
+func (b *atomicBool) SetTrue() bool {
+	return atomic.CompareAndSwapUint32(b.v, 0, 1)
 }
 
-func NewAtomicBool(init bool) *AtomicBool {
-	b := &AtomicBool{}
-	v := int32(0)
-	if init {
-		v = int32(1)
-	}
+func newAtomicBool() *atomicBool {
+	b := &atomicBool{}
+	v := uint32(0)
 	b.v = &v
 	return b
 }

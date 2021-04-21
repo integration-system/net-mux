@@ -46,10 +46,6 @@ func (m *mux) Serve() error {
 
 		for _, sl := range m.ml {
 			_ = sl.listener.Close()
-			for c := range sl.listener.connCh {
-				_ = c.Close()
-			}
-			close(sl.listener.connCh)
 		}
 	}()
 
@@ -58,6 +54,8 @@ func (m *mux) Serve() error {
 		if err != nil {
 			if ne, ok := err.(net.Error); ok && ne.Temporary() {
 				continue
+			} else if errors.Is(err, net.ErrClosed) {
+				return nil
 			}
 			return err
 		}
@@ -116,7 +114,7 @@ func New(l net.Listener) Mux {
 type muxListener struct {
 	root   net.Listener
 	connCh chan net.Conn
-	closed *AtomicBool
+	closed *atomicBool
 }
 
 func (l *muxListener) Accept() (net.Conn, error) {
@@ -125,6 +123,9 @@ func (l *muxListener) Accept() (net.Conn, error) {
 	}
 	c, ok := <-l.connCh
 	if !ok || l.closed.Get() {
+		if c != nil {
+			_ = c.Close()
+		}
 		return nil, ErrListenerClosed
 	}
 	return c, nil
@@ -133,7 +134,12 @@ func (l *muxListener) Accept() (net.Conn, error) {
 // Close stops listening on address.
 // Already Accepted connections are not closed.
 func (l *muxListener) Close() error {
-	l.closed.Set(true)
+	if l.closed.SetTrue() {
+		close(l.connCh)
+		for c := range l.connCh {
+			_ = c.Close()
+		}
+	}
 	return nil
 }
 
@@ -145,7 +151,7 @@ func newMuxListener(root net.Listener, connBufLen int) *muxListener {
 	return &muxListener{
 		root:   root,
 		connCh: make(chan net.Conn, connBufLen),
-		closed: NewAtomicBool(false),
+		closed: newAtomicBool(),
 	}
 }
 
