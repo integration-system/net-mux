@@ -2,7 +2,6 @@ package mux
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"log"
 	"net"
@@ -10,14 +9,17 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 )
 
 func TestHTTP1(t *testing.T) {
-	a := assert.New(t)
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+	a := require.New(t)
 	path := "/test/"
 	method := "GET"
 	mockResData := []byte("948 res")
-	var responseData []byte
 
 	rootListener := newLocalListener()
 	mux := New(rootListener)
@@ -26,9 +28,9 @@ func TestHTTP1(t *testing.T) {
 		a.Fail("connection not matched by a http matcher")
 	})
 
+	muxServeCh := make(chan error, 1)
 	go func() {
-		err := mux.Serve()
-		log.Println(err)
+		muxServeCh <- mux.Serve()
 	}()
 
 	handler := func(writer http.ResponseWriter, request *http.Request) {
@@ -49,18 +51,21 @@ func TestHTTP1(t *testing.T) {
 	req, _ := http.NewRequest(method, url, nil)
 	res, err := httpClient.Do(req)
 	a.NoError(err)
-	if a.NotNil(res) {
-		a.Equal(200, res.StatusCode)
-		responseData, err = ioutil.ReadAll(res.Body)
-		a.NoError(err)
-	}
-
-	time.Sleep(10 * time.Millisecond)
+	a.Equal(200, res.StatusCode)
+	responseData, err := ioutil.ReadAll(res.Body)
+	a.NoError(err)
 	a.Equal(mockResData, responseData)
+	a.NoError(res.Body.Close())
+	httpClient.CloseIdleConnections()
+
+	httpServer.Close()
+	a.NoError(mux.Close())
+	muxServeErr := <-muxServeCh
+	a.NoError(muxServeErr)
 }
 
 func TestAny(t *testing.T) {
-	a := assert.New(t)
+	a := require.New(t)
 	mockReqData := []byte("1 somre")
 	requestData := make([]byte, len(mockReqData))
 
